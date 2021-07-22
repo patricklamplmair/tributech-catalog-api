@@ -1,5 +1,5 @@
 import { InMemoryDBService } from '@nestjs-addons/in-memory-db';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ApiProperty } from '@nestjs/swagger';
 import { to } from 'await-to-js';
@@ -7,6 +7,7 @@ import { JsonldGraph } from 'jsonld-graph';
 import { ModelEntity } from '../models/db-model';
 import { context } from '../models/json-ld-context';
 import { ExpandedInterface, Interface, Relationship } from '../models/models';
+import { ParsedInterface } from '../models/parsed-models';
 import {
   expandInterface,
   hasNoIncomingRelationships,
@@ -32,8 +33,22 @@ export class ModelGraphService {
   getExpanded(modelId: string): ExpandedInterface {
     this.logger.verbose(`Get expanded model for ${modelId}`);
     const model = this.modelGraph.getVertex(modelId);
-    if (!model) throw new Error('Model not found');
+    if (!model) throw new NotFoundException('Model not found');
     return expandInterface(model);
+  }
+
+  getSimplified(modelId: string): ParsedInterface {
+    this.logger.verbose(`Get expanded model for ${modelId}`);
+    const model = this.modelGraph.getVertex(modelId);
+    if (!model) throw new NotFoundException('Model not found');
+    return expandInterface(model) as ParsedInterface;
+  }
+
+  async fullExpand(modelId: string) {
+    this.logger.verbose(`Get fully expanded model for ${modelId}`);
+    const model = this.modelGraph.getVertex(modelId);
+    if (!model) throw new NotFoundException('Model not found');
+    return await model.toJson(context['@context'], { stripContext: false });
   }
 
   getAllExpanded(page = 0, size = 100) {
@@ -59,10 +74,10 @@ export class ModelGraphService {
     const models = this.modelGraph
       .getVertices()
       .filter((x) => x.isType('dtmi:dtdl:class:Interface;2'))
+      .filter((x) => hasNoIncomingRelationships(x))
       .items();
 
-    const roots = models.filter((x) => hasNoIncomingRelationships(x));
-    return roots.map((m) => expandInterface(m));
+    return models.map((m) => expandInterface(m));
   }
 
   getInvolvedRelationships(
@@ -75,13 +90,13 @@ export class ModelGraphService {
 
     const sourceModel = this.getExpanded(sourceModelId);
     if (!sourceModel) {
-      throw new Error(`Model with ${sourceModelId} not found!`);
+      throw new NotFoundException(`Model with ${sourceModelId} not found!`);
     }
 
     if (targetModelId) {
       const targetModel = this.getExpanded(targetModelId);
       if (!targetModel) {
-        throw new Error(`Model with ${targetModelId} not found!`);
+        throw new NotFoundException(`Model with ${targetModelId} not found!`);
       }
 
       return (
